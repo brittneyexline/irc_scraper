@@ -1,6 +1,6 @@
 require 'detective.rb'
 require 'mediawiki_api.rb'
-
+require 'base64'
 require 'time'
 
 class AuthorDetective < Detective
@@ -152,7 +152,7 @@ SQL
     #emailable = res.first['users'].first['user'].first['emailable']    
     
     if(groups != nil)
-	    groups = groups.first['g'].join("##")
+	    groups = Base64.encode64(Marshal.dump(groups.first['g']))
     else
 	    groups = ""
     end
