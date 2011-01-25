@@ -21,3 +21,7 @@ IRC_LOG_DIR_PATH = File.dirname(__FILE__) + '/../log'
 
 WIKI_API_SERVER = 'en.wikipedia.org' #no http:// and no trailing slash
 WIKI_API_PATH = '/w/api.php' #leading slash
+
+ALEXA_API_PATH = 'awis.amazonaws.com'
+ALEXA_KEY_ID = 'FILL IN KEY'
+ALEXA_SECRET_KEY = 'FILL IN KEY'
