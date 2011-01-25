@@ -119,4 +119,9 @@ class ExternalLinkDetectiveTest < Test::Unit::TestCase
     assert_equal(['SocketError', false], source)
   end
 
+  def test_find_extlinkinfo
+      linkinfo = @detective.find_alexa_info('www.imdb.com')
+      assert_equal(39,linkinfo)
+  end
+
 end
