@@ -17,6 +17,7 @@ class ExternalLinkDetective < Detective
       revision_id integer,                              --foreign key to reference the original revision
       link string,
       source text,
+      screenshot text,
       FOREIGN KEY(revision_id) REFERENCES irc_wikimedia_org_en_wikipedia(id)   --TODO this table name probably shouldnt be hard coded
 SQL
     end
@@ -39,8 +40,8 @@ SQL
     rownum = 0
     linkarray.each do |linkentry|
       rownum = db_write!(
-        ['revision_id', 'link', 'source'],
-	      [info[0], linkentry["link"], linkentry["source"]]
+        ['revision_id', 'link', 'source', 'screenshot'],
+	      [info[0], linkentry["link"], linkentry["source"], linkentry['screenshot']]
 	    )
     end	
     rownum
@@ -104,7 +105,15 @@ SQL
        if(source.length > 10000)
          source = source[0,10000]
        end
-       linkarray << {"link" => link, "source" => source}
+       #not sure exactly where to store the images, probably should have their own directory
+       imname = link.delete "."
+       imname = imname.delete "/"
+       imnaame = imname + '.jpg'
+       request = "http://api1.thumbalizr.com/?url=" + link + "&width=300"
+       resp2 = Net::HTTP.get_response(URI.parse(request))
+       file = File.open( imname , 'wb' )
+       file.write(resp2.body)
+       linkarray << {"link" => link, "source" => source, "image" => imname}
     end
     linkarray
   end  
