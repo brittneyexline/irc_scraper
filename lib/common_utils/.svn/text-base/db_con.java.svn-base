@@ -1,0 +1,60 @@
+package common_utils;
+
+import java.sql.Connection;
+import java.sql.DriverManager;
+
+/**
+ * Andrew G. West - db_con.java - Streamlining DB-connectivity for the
+ * Wiki-Link-Spam project. This differs from those in existing projects
+ * because this one may require multiple DB access. 
+ */
+public class db_con{
+
+	// **************************** PUBLIC FIELDS ****************************
+	
+	/**
+	 * Enumeration listing the DBs which can be connected to.
+	 */
+	public enum DBS{presta_stiki, presta_spam, wiki_link_spam, dmoz};
+	
+	
+	// **************************** PUBLIC METHODS ***************************
+	
+	/**
+	 * Retrieve a connection to some database.
+	 * @param DBS db Specific database to which connected should be made
+	 * @return Connection to DB, or NULL if there was a connection error
+	 */
+	public static Connection get_con(DBS db){
+			
+		String url, user, pass;
+		if(db == DBS.wiki_link_spam){
+			url = "jdbc:mysql://brahma.cis.upenn.edu:3306/wiki_link_spam"; 
+			user = "westand";
+			pass = "qtm2009";
+		} else if(db == DBS.presta_spam){
+			url = "jdbc:mysql://158.130.51.53:3306/presta_spam";
+			user = "root";
+			pass = "qtm2009";
+		} else if(db == DBS.presta_stiki){
+			url = "jdbc:mysql://158.130.51.53:3306/presta_stiki";
+			user = "root";
+			pass = "qtm2009";
+		} else{ // if(db == DBS.dmoz)
+			url = "jdbc:mysql://brahma.cis.upenn.edu:3306/dmoz";
+			user = "westand";
+			pass = "qtm2009";
+		} // First establish the connection properties
+	
+		Connection con = null; // Then proceed to connect
+		try{ // In the case of an error, just return NULL
+			Class.forName("com.mysql.jdbc.Driver").newInstance();
+			con = DriverManager.getConnection(url, user, pass);
+		} catch(Exception e){
+			System.err.println("Error opening DB connection");
+			e.printStackTrace();
+		} // Also output a message to system.err
+		return con;	
+	}
+	
+}

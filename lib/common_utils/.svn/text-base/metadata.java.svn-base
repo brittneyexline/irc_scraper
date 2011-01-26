@@ -1,0 +1,88 @@
+package common_utils;
+
+/**
+ * Andrew G. West - metadata.java - A slimmed down version of the STiki
+ * metadata class for use with [pagecount] data.
+ */
+public class metadata{
+	
+	// **************************** PUBLIC FIELDS ****************************
+
+	/**
+	 * Unique revision ID of the data to be added.
+	 */
+	public final long rid;
+	
+	/**
+	 * Unique page-identifier (number) mapping to 'title'.
+	 */
+	public final long pid;
+	
+	/**
+	 * Timestamp (UNIX) at which 'rid' made.
+	 */
+	public final long timestamp;
+	
+	/**
+	 * Namespace in which the edit took place.
+	 */
+	public final int namespace;
+	
+	/**
+	 * English title of the article on which 'rid' was made.
+	 */
+	public final String title;
+	
+	/**
+	 * Registered user-name or IP of editor making 'rid'.
+	 */
+	public final String user;
+
+	/**
+	 * An indication if string 'user' is an IP address.
+	 */
+	public final boolean user_is_ip;
+	
+	/**
+	 * Revision comment left by 'user'.
+	 */
+	public final String comment;
+	
+	
+	// ***************************** CONSTRUCTORS ****************************
+	
+	/**
+	 * Construct a [metadata] object by providing all fields in STRING format.
+	 * We forgoe an at length description of the parameters here (see above),
+	 * but note that the TIMESTAMP argument should be provided in Wiki-format
+	 * and will subsequently be transformed into a UNIX one.
+	 */
+	public metadata(String str_rid, String str_timestamp, 
+			String str_title, String str_pid, String str_namespace, 
+			String str_user, String str_comment)  throws Exception{
+		
+			// NOTE: For string fields, we have chosen not to escape
+			// special characters. Escaping IS done internal to DB handlers,
+			// (and thus in the DB) as such formatting can error DB formats.
+		
+			// Some fields are simple numerical parsings
+		this.namespace = Integer.parseInt(str_namespace);
+		this.rid = Long.parseLong(str_rid);
+		this.pid = Long.parseLong(str_pid);
+		this.title = str_title;
+		
+			// If no comment provided, no attribute is set in XML, leading
+			// to null-status -- which is corrected here.
+		if(str_comment == null) this.comment = "";
+		else this.comment = str_comment;
+		
+			// User parse; determine if registered or anonymous (IP address).
+		this.user = str_user;
+		if(this.user.matches("(\\d)+\\.(\\d)+\\.(\\d)+\\.(\\d)+"))
+			user_is_ip = true;
+		else user_is_ip = false;
+		
+			// Only timestamp requires serious transformation
+		this.timestamp = wiki_utils.wiki_ts_to_unix(str_timestamp);
+	}
+}
