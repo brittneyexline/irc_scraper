@@ -117,7 +117,12 @@ class ExternalLinkDetectiveTest < Test::Unit::TestCase
 
   def test_find_extlinkinfo
       linkinfo = @detective.find_alexa_info('www.imdb.com')
-      assert_equal(39,linkinfo)
+      assert_equal(39,linkinfo[12])
+  end
+
+  def test_find_malwareinfo
+      malwareinfo = @detective.find_malware_info('www.imdb.com')
+      assert_equal([0,0], [malwareinfo[0], malwareinfo[1]])
   end
 
   def test_finds_all_links
@@ -129,6 +134,6 @@ class ExternalLinkDetectiveTest < Test::Unit::TestCase
     assert_equal('Designing heroes', hash['description'])
     assert_equal(true, hash['http_response'])
     assert_equal('http://www.eyemagazine.com/feature.php?id=62&amp;fid=270', hash['link'])
-    assert_equal(100, hash['source'].length)
+    assert_equal(22190, hash['source'].length)
   end
 end

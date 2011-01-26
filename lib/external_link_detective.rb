@@ -56,7 +56,10 @@ class ExternalLinkDetective < Detective
       rank_by_city string,
       rank_by_country string,
 
-      FOREIGN KEY(revision_id) REFERENCES irc_wikimedia_org_en_wikipedia(id)
+      screenshot text,
+      phishing text,
+      malware text,
+      FOREIGN KEY(revision_id) REFERENCES irc_wikimedia_org_en_wikipedia(id)   --TODO this table name probably shouldnt be hard coded
 SQL
     end
   end
@@ -94,8 +97,9 @@ SQL
       'views_rank',
       'views_rank_delta','views_peruser','views_peruser_delta',
       'rank_by_city',
-      'rank_by_country'],
-	      [info[0], linkentry["link"], linkentry["source"], linkentry["description"]] + linkentry["linkinfo"]    )
+      'rank_by_country' 'screenshot', 'phishing', 'malware'],
+	      [info[0], linkentry["link"], linkentry["source"], linkentry["description"]] + linkentry["linkinfo"] + [linkentry["screenshot"], linkentry["phishing"], linkentry["malware"]]
+	    )
     end	
     true
   end	
@@ -149,10 +153,20 @@ SQL
     
     ret = []
     linkarray.each do |arr|
-      source, success = find_source(arr.first)
-      linkinfo = find_alexa_info(arr.first)
-
-      ret << {"link" => arr.first, "source" => source, "http_response" => success, 'description' => arr.last, "linkinfo" => linkinfo}
+       source, success = find_source(arr.first)
+       linkinfo = find_alexa_info(arr.first)
+       link = arr.first
+       imname = link.delete "."
+       imname = imname.delete "/"
+       imnaame = imname + '.jpg'
+       request = "http://api1.thumbalizr.com/?url=" + link + "&width=300"
+       resp2 = Net::HTTP.get_response(URI.parse(request))
+       file = File.open( imname , 'wb' )
+       file.write(resp2.body)
+       #all of andrews malware code needst to be in the same directory as this file, 
+       #it doesn't run the command properly when you try to call the file with the pathname
+       malware_info = find_malware_info(link)
+      ret << {"link" => arr.first, "source" => source, "http_response" => success, 'description' => arr.last, "linkinfo" => linkinfo, "screenshot" => imname, "phishing" => malware_info[0], "malware" => malware_info[1]}
     end
     ret
   end
@@ -183,6 +197,7 @@ SQL
     else
       ret << resp.class.to_s
       ret << false
+
     end
     ret
     # response = Net::HTTP.get_response(URI.parse(uri_str))
@@ -250,5 +265,12 @@ def find_alexa_info(link)
       end
 
       [linkinfo::site_title.to_s, linkinfo::site_description.to_s, Time.parse(linkinfo::online_since).to_i, linkinfo::speed_median_load_time.to_f, linkinfo::speed_percentile.to_f, ac, linkinfo::language_locale.to_s, linkinfo::language_encoding.to_s, linkinfo::links_in_count.to_i, Base64.encode64(Marshal.dump(linkinfo::keywords)), linkinfo::related_links.size.to_i, Base64.encode64(Marshal.dump(linkinfo::related_links)), rank.to_i, rank_delta.to_f, reach_rank.to_i, reach_rank_delta.to_f, reach_permill.to_f, reach_permill_delta.to_f, views_permill.to_f, views_permill_delta.to_f, views_rank.to_i, views_rank_delta.to_f, views_peruser.to_f, views_peruser_delta.to_f, Base64.encode64(Marshal.dump(linkinfo::rank_by_city)), Base64.encode64(Marshal.dump(linkinfo::rank_by_country))]
+  end
+
+  def find_malware_info(link)
+       sbinfo = `java test #{link}`
+       sbinfo = sbinfo.chomp
+       sbarr = sbinfo.partition(",")
+       [sbarr[0],sbarr[2]]
   end
 end
