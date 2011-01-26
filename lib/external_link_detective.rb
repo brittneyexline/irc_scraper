@@ -18,6 +18,8 @@ class ExternalLinkDetective < Detective
       link string,
       source text,
       screenshot text,
+      phishing text,
+      malware text,
       FOREIGN KEY(revision_id) REFERENCES irc_wikimedia_org_en_wikipedia(id)   --TODO this table name probably shouldnt be hard coded
 SQL
     end
@@ -40,8 +42,8 @@ SQL
     rownum = 0
     linkarray.each do |linkentry|
       rownum = db_write!(
-        ['revision_id', 'link', 'source', 'screenshot'],
-	      [info[0], linkentry["link"], linkentry["source"], linkentry['screenshot']]
+        ['revision_id', 'link', 'source', 'screenshot', 'phishing', 'malware'],
+	      [info[0], linkentry["link"], linkentry["source"], linkentry['screenshot'], linkentry['phishing'], linkentry['malware']]
 	    )
     end	
     rownum
@@ -102,8 +104,8 @@ SQL
        end
        #TODO do a check for the size and type-content of it before we pull it
        #binary files we probably don't need to grab and things larger than a certain size we don't want to grab
-       if(source.length > 10000)
-         source = source[0,10000]
+       if(source.length > 100000)
+         source = source[0,100000]
        end
        #not sure exactly where to store the images, probably should have their own directory
        imname = link.delete "."
@@ -113,7 +115,14 @@ SQL
        resp2 = Net::HTTP.get_response(URI.parse(request))
        file = File.open( imname , 'wb' )
        file.write(resp2.body)
-       linkarray << {"link" => link, "source" => source, "image" => imname}
+       #all of andrews malware code needst to be in the same directory as this file, 
+      #it doesn't run the command properly when you try to call the file with the pathname
+       sbinfo = `java test #{link}`
+       sbinfo = sbinfo.chomp
+       sbarr = sbinfo.partition(",")
+       phishing = sbarr[0]
+       malware = sbarr[2]
+       linkarray << {"link" => link, "source" => source, "image" => imname, "phishing" => isphishing, "malware" => ismalware}
     end
     linkarray
   end  
