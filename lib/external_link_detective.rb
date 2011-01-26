@@ -18,6 +18,7 @@ class ExternalLinkDetective < Detective
   #if using this as an example, you probably should copy the first two columns (the id and foreign key)
   def self.columns
     Proc.new do
+      <<-SQL
       id integer primary key autoincrement,
       revision_id integer,                              --foreign key to reference the original revision
       http_response boolean,
@@ -55,7 +56,8 @@ class ExternalLinkDetective < Detective
       rank_by_city string,
       rank_by_country string,
 
-      FOREIGN KEY(revision_id) REFERENCES irc_wikimedia_org_en_wikipedia(id)  
+      FOREIGN KEY(revision_id) REFERENCES irc_wikimedia_org_en_wikipedia(id)
+SQL
     end
   end
 
