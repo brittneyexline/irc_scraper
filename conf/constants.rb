@@ -23,5 +23,5 @@ WIKI_API_SERVER = 'en.wikipedia.org' #no http:// and no trailing slash
 WIKI_API_PATH = '/w/api.php' #leading slash
 
 ALEXA_API_PATH = 'awis.amazonaws.com'
-ALEXA_KEY_ID = 'FILL IN KEY'
-ALEXA_SECRET_KEY = 'FILL IN KEY'
+ALEXA_KEY_ID = 'ENTER KEY'
+ALEXA_SECRET_KEY = 'ENTER KEY'
