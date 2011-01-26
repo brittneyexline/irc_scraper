@@ -180,4 +180,3 @@ class EnWikiBot < Bot #TODO db.close
   end
   
 end
-  
