@@ -20,15 +20,15 @@ class ExternalLinkDetective < Detective
     Proc.new do
       <<-SQL
       id integer primary key autoincrement,
-      revision_id integer,                              --foreign key to reference the original revision
-      http_response boolean,
-      link string,
-
+      revision_id integer,
+      link text,
+      headers text,
       source text,
-      site_description string,
+      description text,
+      --created DATE DEFAULT (datetime('now','localtime'))
 
       title string,
-      description string, 
+      site_description string,
       online_since timestamp,
       speed_medianloadtime decimal, 
       speed_percentile decimal,
@@ -60,27 +60,50 @@ class ExternalLinkDetective < Detective
       phishing text,
       malware text,
       FOREIGN KEY(revision_id) REFERENCES irc_wikimedia_org_en_wikipedia(id)   --TODO this table name probably shouldnt be hard coded
+
 SQL
     end
   end
 
   #info is a list: 
-  # 0: sample_id (string), 
-  # 1: article_name (string), 
-  # 2: desc (string), 
-  # 3: rev_id (string),
-  # 4: old_id (string)
-  # 5: user (string), 
-  # 6: byte_diff (int), 
-  # 7: timestamp (Time object), 
-  # 8: description (string)
+  # see notes before start_detective in enwiki_bot
   def investigate info
-        
-    linkarray = find_link_info(info)
+    linkarray = info.last
     
-    linkarray.each do |linkentry|
-      rownum = db_write!(
-        ['revision_id', 'link', 'source', 'site_description', 'title', 'description', 'online_since', 'speed_medianloadtime', 'speed_percentile', 'adult_content', 'language_locale',
+    results = []
+    linkarray.each do |arr|
+      #puts arr.first
+      source_content_error, headers = find_source(arr.first)
+      headers_str = Marshal.dump(headers)
+      #ignore binary stuff for now
+      linkinfo = find_alexa_info(arr.first)
+      link = arr.first
+      imname = link.delete "."
+      imname = imname.delete "/"
+      imnaame = imname + '.jpg'
+      request = "http://api1.thumbalizr.com/?url=" + link + "&width=300"
+      resp2 = Net::HTTP.get_response(URI.parse(request))
+      file = File.open( imname , 'wb' )
+      file.write(resp2.body)
+      #all of andrews malware code needst to be in the same directory as this file,
+      #it doesn't run the command properly when you try to call the file with the pathname
+      malware_info = find_malware_info(link)
+      
+      results << { 
+        :link => arr.first, 
+        :source => ['gzip', 'deflate', 'compress'].include?(headers['Content-encoding']) ? 'encoded' : source_content_error, 
+        :description => arr.last, 
+        :headers => headers_str,
+        :linkinfo => linkinfo,
+        :screenshot => imname,
+        :phishing => malware_info[0],
+        :malware => malware_info[1]
+      }
+    end
+
+    results.each do |linkentry|
+      db_queue(
+        ['revision_id', 'link', 'source', 'description', 'headers' 'title', 'site_description', 'online_since', 'speed_medianloadtime', 'speed_percentile', 'adult_content', 'language_locale',
       'language_encoding',
       'links_in_count',
       'keywords',
@@ -88,9 +111,9 @@ SQL
       'related_links',
       'rank',
       'rank_delta',
-      'reach_rank', 
+      'reach_rank',
       'reach_rank_delta',
-      'reach_permill', 
+      'reach_permill',
       'reach_permill_delta',
       'views_permill',
       'views_permill_delta',
@@ -98,79 +121,16 @@ SQL
       'views_rank_delta','views_peruser','views_peruser_delta',
       'rank_by_city',
       'rank_by_country' 'screenshot', 'phishing', 'malware'],
-	      [info[0], linkentry["link"], linkentry["source"], linkentry["description"]] + linkentry["linkinfo"] + [linkentry["screenshot"], linkentry["phishing"], linkentry["malware"]]
+      [info[2], linkentry[:link], linkentry[:source], linkentry[:description], linkentry[:headers]] +
+        linkentry[:linkinfo] +
+        [[linkentry[:screenshot], linkentry[:phishing], linkentry[:malware]]
+      )
 	    )
     end	
-    true
+    true # :)
   end	
   
-  #really only uses revid and previous
-  def find_link_info info
-    #this is actually 'page' stuff
-    #take popularity from: http://www.trendingtopics.org/page/[article_name]; links to csv's with daily and hourly popularity
-    #http://stats.grok.se/en/top <- lists top pages
-    #http://stats.grok.se/en/[year][month]/[article_name]
-    #also http://toolserver.org/~emw/wikistats/?p1=Barack_Obama&project1=en&from=12/10/2007&to=12/11/2010&plot=1
-    #http://wikitech.wikimedia.org/view/Main_Page
-    #http://lists.wikimedia.org/pipermail/wikitech-l/2007-December/035435.html
-    #http://wiki.wikked.net/wiki/Wikimedia_statistics/Daily
-    #http://aws.amazon.com/datasets/Encyclopedic/4182
-    #https://github.com/datawrangling/trendingtopics
-
-    #link popularity/safety stuff:
-    #http://code.google.com/apis/safebrowsing/
-    #http://groups.google.com/group/google-safe-browsing-api/browse_thread/thread/b711ba69a4ecbb2f/29aa959a3a28a0bd?#29aa959a3a28a0bd
-
-    #this is what we're going to do: get all external links for prev_id and all external links for curr_id and diff them, any added => new extrnal links to find
-    #http://en.wikipedia.org/w/api.php?action=query&prop=extlinks&revids=800129
-    #http://en.wikipedia.org/w/api.php?action=query&prop=extlinks&revids=409897423&ellimit=500
-    #http://en.wikipedia.org/w/api.php?action=query&prop=extlinks&revids=409897009&ellimit=500
-    #diff text: http://en.wikipedia.org/w/api.php?action=query&prop=revisions&revids=409897423&rvdiffto=prev
-    xml = get_xml({:format => :xml, :action => :query, :prop => :revisions, :revids => info[3], :rvdiffto => 'prev'})
-    diff_text = Nokogiri.XML(xml).css('diff').children.to_s
-    diff_html = CGI.unescapeHTML(diff_text)
-    noked = Nokogiri.HTML(diff_html)
-    
-    #TODO can have bad revid's (ie first edits on a page)
-    linkarray = []
-    noked.css('.diff-addedline').each do |td| #TODO should probably be looking specifically at .diffchange children for added text within the line
-      revision_line = Nokogiri.HTML(CGI.unescapeHTML(td.children.to_s)).css('div').children
-      #http://daringfireball.net/2010/07/improved_regex_for_matching_urls
-      #%r{(?i)\b((?:https?://|www\d{0,3}[.]|[a-z0-9.\-]+[.][a-z]{2,4}/)(?:[^\s()<>]+|\(([^\s()<>]+|(\([^\s()<>]+\)))*\))+(?:\(([^\s()<>]+|(\([^\s()<>]+\)))*\)|[^\s`!()\[\]{};:'".,<>?«»“”‘’]))}
-      url = %r{(?i)\b((?:https?://|www\d{0,3}[.]|[a-z0-9.\-]+[.][a-z]{2,4}/)(?:[^\s()<>]+|\(([^\s()<>]+|(\([^\s()<>]+\)))*\))+(?:\(([^\s()<>]+|(\([^\s()<>]+\)))*\)|[^\s`!()\[\]{};:'".,<>?«»“”‘’]))}
-      #based on http://www.mediawiki.org/wiki/Markup_spec/BNF/Links
-      external_link_regex = /\[(#{url}\s*(.*?))\]/
-      #TODO pull any correctly formed links too?
-      res = revision_line.to_s.scan(external_link_regex)
-      if res.size > 0
-        #p res
-        res = res.first.compact
-        #["http://www.eyemagazine.com/feature.php?id=62&amp;fid=270 Designing heroes", "http://www.eyemagazine.com/feature.php?id=62&amp;fid=270", "Designing heroes"]
-        linkarray << [res[1], #link
-                      res[2]] #description
-      end
-    end
-    
-    ret = []
-    linkarray.each do |arr|
-       source, success = find_source(arr.first)
-       linkinfo = find_alexa_info(arr.first)
-       link = arr.first
-       imname = link.delete "."
-       imname = imname.delete "/"
-       imnaame = imname + '.jpg'
-       request = "http://api1.thumbalizr.com/?url=" + link + "&width=300"
-       resp2 = Net::HTTP.get_response(URI.parse(request))
-       file = File.open( imname , 'wb' )
-       file.write(resp2.body)
-       #all of andrews malware code needst to be in the same directory as this file, 
-       #it doesn't run the command properly when you try to call the file with the pathname
-       malware_info = find_malware_info(link)
-      ret << {"link" => arr.first, "source" => source, "http_response" => success, 'description' => arr.last, "linkinfo" => linkinfo, "screenshot" => imname, "phishing" => malware_info[0], "malware" => malware_info[1]}
-    end
-    ret
-  end
-  
+  #return either the source, a non text/html contenttype or the httperror class, all as strings
   def find_source(url)
     #TODO do a check for the size and type-content of it before we pull it
     #binary files we probably don't need to grab and things larger than a certain size we don't want to grab
@@ -187,32 +147,24 @@ SQL
     
     ret = []
     if(resp.is_a? Net::HTTPOK or resp.is_a? Net::HTTPFound)
+      #truncate at 100K characters; not a good way to deal with size, should check the headers only
+      #else set the body to the content type
       if resp.content_type == 'text/html'
-        #puts resp.body.length
-        ret << resp.body[0..10**5] #truncate at 100K characters; not a good way to deal with size, should check the headers only
+        ret << resp.body[0..10**5]
       else
         ret << resp.content_type
       end
-      ret << true
-    else
+    else #TODO follow redirects!
+      #if it's a bad http response set the body equal to that response
       ret << resp.class.to_s
+<<<<<<< HEAD
       ret << false
 
+=======
+>>>>>>> 97ce4d1a19e6a9b03f26b2a3e928e1c161cd8114
     end
+    ret << resp.to_hash #the headers
     ret
-    # response = Net::HTTP.get_response(URI.parse(uri_str))
-    # case response
-    # when Net::HTTPSuccess     then response
-    # when Net::HTTPRedirection then fetch(response['location'], limit - 1)
-    # else
-    #   response.error!
-    # end
-    
-    #response = nil
-    #Net::HTTP.start('some.www.server', 80) {|http|
-    #  response = http.head('/index.html')
-    #}
-    #p response['content-type']
   end
   
 def find_alexa_info(link)
