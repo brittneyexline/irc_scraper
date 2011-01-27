@@ -2,6 +2,7 @@ require 'detective.rb'
 require 'mediawiki_api.rb'
 require 'base64'
 require 'time'
+require 'date'
 
 class AuthorDetective < Detective
   def self.table_name
@@ -37,7 +38,7 @@ class AuthorDetective < Detective
       block_reason text,
       user_talkpg_text text,
       created DATE DEFAULT (datetime('now','localtime')),
-      FOREIGN KEY(revision_id) REFERENCES irc_wikimedia_org_en_wikipedia(revision_id)    --these foreign keys probably won't be enforced b/c sqlite doesn't include it by default--TODO this foreign table name probably shouldn't be hard coded
+      --FOREIGN KEY(revision_id) REFERENCES irc_wikimedia_org_en_wikipedia(revision_id)    --these foreign keys probably won't be enforced b/c sqlite doesn't include it by default--TODO this foreign table name probably shouldn't be hard coded
 SQL
     end
   end
@@ -133,7 +134,11 @@ SQL
     create = '-'
     life = 0
     editcount = 0
-    timestamp = info[8]['timestamp']
+    if (info[8] != nil)
+      timestamp = Time.parse(info[8]["timestamp"], "%Y-%m-%dT%H:%M:%SZ")
+    else
+      timestamp = Time.now
+    end
     if(rxml['registration'] != nil)
       create = Time.parse(rxml['registration'])
       life = timestamp - create #TODO all of these timestamps need to be changed to reflect the newer info structure
@@ -146,9 +151,13 @@ SQL
       #for ip address users, there is no editcount, take that from below instead
       editcount = rxml['editcount']
     else
-      editcount_xml = get_xml({:format => :xml, :action => :query, :list => :usercontribs, :ucuser => info[5], :uclimit => 500})
+      editcount_xml = get_xml({:format => :xml, :action => :query, :list => :usercontribs, :ucuser => info[4], :uclimit => 500})
       editcount_res = parse_xml(editcount_xml)
-      editcount = editcount_res.first['usercontribs'].first['item'].length
+      if (editcount_res.first['usercontribs']!=nil and editcount_res.first['usercontribs'].first['item']!=nil)
+        editcount = editcount_res.first['usercontribs'].first['item'].length
+      else
+        editcount = 0
+      end
     end
     
     groups = rxml['groups']
@@ -187,11 +196,11 @@ SQL
     res3 = parse_xml(xml3)
     blockinfo = res3.first['blocks'].first['block']
     blocktimes = 0
-    if(blockinfo != nil)
+    if(blockinfo!=nil)
 	    blocktimes =  blockinfo.length.to_i
-	    blockinfo = find_block_info(blockinfo)
+	    block_info = find_block_info(blockinfo)
     else
-	    blockinfo = [] #empty array cause we ignore it above
+	    block_info = [] #empty array cause we ignore it above
     end
     
     usertalkpg_title = "User:"+info[4]
@@ -205,7 +214,7 @@ SQL
        end
     end
     
-    [create, life, editcount.to_i] + editcount_bucket + [groups.to_s, blocktimes] + blockinfo + [source]
+    [create, life, editcount.to_i] + editcount_bucket + [groups.to_s, blocktimes] + block_info + [source]
   end
 
   #block_id integer,

@@ -25,8 +25,9 @@ class ExternalLinkDetective < Detective
       headers text,
       source text,
       description text,
-      created DATE DEFAULT (datetime('now','localtime'))
+      created DATE DEFAULT (datetime('now','localtime')),
 
+      --stuff from alexa--
       title string,
       site_description string,
       online_since timestamp,
@@ -56,10 +57,11 @@ class ExternalLinkDetective < Detective
       rank_by_city string,
       rank_by_country string,
 
+      --stuff from google malware--
       screenshot text,
       phishing text,
       malware text,
-      FOREIGN KEY(revision_id) REFERENCES irc_wikimedia_org_en_wikipedia(revision_id)   --TODO this table name probably shouldnt be hard coded
+      --FOREIGN KEY(revision_id) REFERENCES irc_wikimedia_org_en_wikipedia(revision_id)   --TODO this table name probably shouldnt be hard coded
 
 SQL
     end

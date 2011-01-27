@@ -6,7 +6,8 @@ require 'time'
 class ExternalLinkDetectiveTest < Test::Unit::TestCase
   def setup
     @db = SQLite3::Database.new(":memory:")
-    @db.execute('CREATE TABLE irc_wikimedia_org_en_wikipedia (
+    @db.execute('CREATE TABLE irc_wikimedia_org_en_wikipedia
+             (
       id integer primary key autoincrement,
       article_name varchar(128) not null,
       desc varchar(8),
@@ -14,8 +15,8 @@ class ExternalLinkDetectiveTest < Test::Unit::TestCase
       old_id integer,
       user varchar(64),
       byte_diff integer,
-      ts timestamp(20),
-      description text)')
+      description text
+    )')
     @clazz = ExternalLinkDetective
     @queue = []
     @detective = @clazz.new(@queue)
@@ -58,17 +59,17 @@ class ExternalLinkDetectiveTest < Test::Unit::TestCase
   def test_find_source
     source = @detective.find_source('http://example.com/')
     known_source = "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01 Transitional//EN\">\r\n<HTML>\r\n<HEAD>\r\n  <META http-equiv=\"Content-Type\" content=\"text/html; charset=utf-8\">\r\n  <TITLE>Example Web Page</TITLE>\r\n</HEAD> \r\n<body>  \r\n<p>You have reached this web page by typing &quot;example.com&quot;,\r\n&quot;example.net&quot;,&quot;example.org&quot\r\n  or &quot;example.edu&quot; into your web browser.</p>\r\n<p>These domain names are reserved for use in documentation and are not available \r\n  for registration. See <a href=\"http://www.rfc-editor.org/rfc/rfc2606.txt\">RFC \r\n  2606</a>, Section 3.</p>\r\n</BODY>\r\n</HTML>\r\n\r\n"
-    assert_equal(known_source, source)
+    assert_equal(known_source, source[0])
     
     source = @detective.find_source('http://example.com')
     known_source = "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01 Transitional//EN\">\r\n<HTML>\r\n<HEAD>\r\n  <META http-equiv=\"Content-Type\" content=\"text/html; charset=utf-8\">\r\n  <TITLE>Example Web Page</TITLE>\r\n</HEAD> \r\n<body>  \r\n<p>You have reached this web page by typing &quot;example.com&quot;,\r\n&quot;example.net&quot;,&quot;example.org&quot\r\n  or &quot;example.edu&quot; into your web browser.</p>\r\n<p>These domain names are reserved for use in documentation and are not available \r\n  for registration. See <a href=\"http://www.rfc-editor.org/rfc/rfc2606.txt\">RFC \r\n  2606</a>, Section 3.</p>\r\n</BODY>\r\n</HTML>\r\n\r\n"
-    assert_equal(known_source, source)
+    assert_equal(known_source, source[0])
     
     source = @detective.find_source('http://example.com/asdfasdf')
-    assert_equal('Net::HTTPNotFound', source)
+    assert_equal('Net::HTTPNotFound', source[0])
     
     source = @detective.find_source('http://pqualsdkjfladf.com/asdfasdf') #non-existent url
-    assert_equal('SocketError', source)
+    assert_equal('SocketError', source[0])
   end
 
   def test_find_extlinkinfo
@@ -81,17 +82,17 @@ class ExternalLinkDetectiveTest < Test::Unit::TestCase
       assert_equal([0,0], [malwareinfo[0], malwareinfo[1]])
   end
 
-  def test_finds_all_links
-    hash = @detective.find_link_info([nil, nil, nil, 409897423, 409897009]).first
-    expected = {
-      "description"=>"",
-      "http_response"=>true,
-      "link"=>""}
-    assert_equal('Designing heroes', hash['description'])
-    assert_equal(true, hash['http_response'])
-    assert_equal('http://www.eyemagazine.com/feature.php?id=62&amp;fid=270', hash['link'])
-    assert_equal(22190, hash['source'].length)
-  end
+#  def test_finds_all_links
+#    hash = @detective.find_link_info([nil, nil, nil, 409897423, 409897009]).first
+#    expected = {
+#      "description"=>"",
+#      "http_response"=>true,
+#      "link"=>""}
+#    assert_equal('Designing heroes', hash['description'])
+#    assert_equal(true, hash['http_response'])
+#    assert_equal('http://www.eyemagazine.com/feature.php?id=62&amp;fid=270', hash['link'])
+#    assert_equal(22190, hash['source'].length)
+#  end
   
   # def test_find_link_info
   #     hash = @detective.find_link_info([nil, nil, nil, 409897423, 409897009]).first
