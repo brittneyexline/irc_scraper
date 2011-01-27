@@ -123,9 +123,7 @@ SQL
       'rank_by_country' 'screenshot', 'phishing', 'malware'],
       [info[2], linkentry[:link], linkentry[:source], linkentry[:description], linkentry[:headers]] +
         linkentry[:linkinfo] +
-        [[linkentry[:screenshot], linkentry[:phishing], linkentry[:malware]]
-      )
-	    )
+        [[linkentry[:screenshot], linkentry[:phishing], linkentry[:malware]] )
     end	
     true # :)
   end	
@@ -157,11 +155,6 @@ SQL
     else #TODO follow redirects!
       #if it's a bad http response set the body equal to that response
       ret << resp.class.to_s
-<<<<<<< HEAD
-      ret << false
-
-=======
->>>>>>> 97ce4d1a19e6a9b03f26b2a3e928e1c161cd8114
     end
     ret << resp.to_hash #the headers
     ret
