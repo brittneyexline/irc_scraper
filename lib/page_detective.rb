@@ -47,7 +47,7 @@ SQL
     page = find_page_history(info)
     db_write!(
       ['revision_id', 'page_last_revision_id', 'page_last_revision_time', 'page_text', 'length', 'num_views', 'talk_id', 'page_id'],
-      [info[0]] + page
+      [info[2]] + page
     )
   end
 
