@@ -7,59 +7,125 @@ require 'external_link_detective.rb'
 
 require 'rubygems'
 require 'sqlite3'
+require 'thread'
+require 'digest/md5'
+require 'ThreadPool.rb'
+require 'logger'
 
 class EnWikiBot < Bot #TODO db.close
   
-  attr_accessor :db
+  attr_accessor :db, :name
   
   def initialize(server, port, channel, password = '', bot_name = BOT_NAME, db = nil)
     #server = 'irc.wikimedia.org' if server.nil?
     #channel = 'en.wikipedia' if channel.nil?
     #puts server + channel
-    #@log_file = File.new(IRC_LOG_FILE_PATH, "a")
-    
-    @table_name = server.gsub(/\./, '_') + '_' + channel.gsub(/\./, '_') #TODO this isn't really sanitized...use URI.parse
 
+    @table_name = server.gsub(/\./, '_') + '_' + channel.gsub(/\./, '_') #TODO this isn't really sanitized...use URI.parse
+    @error = Logger.new('log/bot.log') 
+    @db_log = Logger.new('log/db.log')
+    @db_log_main = Logger.new('log/db_main.log')
+    @db_log_link = Logger.new('log/link.log')
     if db
       @db = db
       db_create_schema!(@table_name)
     elsif db_exists?(bot_name)
       #assume table has already been created, we're continuing from previous use
-      db_open bot_name
+      @db = db_open(bot_name)
     else
       @db = db_create!(bot_name)
       db_create_schema!(@table_name)
     end
-    db_init
+    @name = bot_name
+    
+    #https://github.com/danielbush/ThreadPool for info on the threadpool
+    @workers = ThreadPooling::ThreadPool.new(20)
+    @db_queue = Queue.new
+    #puts 'initial memory location: ' + @db_queue.to_s
+    @db_results = {}
+    start_db_worker()
     
     #Thread.abort_on_exception = true #set this so that if there's an exception on any of these threads, everything quits - good for initial debugging
-    @detectives = [RevisionDetective.new(@db), AuthorDetective.new(@db), ExternalLinkDetective.new(@db), PageDetective.new(@db)]
+    #@detectives = [RevisionDetective.new(@db), AuthorDetective.new(@db), ExternalLinkDetective.new(@db), PageDetective.new(@db)]
+    @detectives = [RevisionDetective, AuthorDetective, ExternalLinkDetective, PageDetective]
+    @detectives.each do |clazz|
+      clazz.setup_table(@db)
+    end
     
     super(bot_name)
+  end
+  
+  def start_db_worker()
+    db = db_open(@name)
+    @workers.dispatch do
+      loop do #keep this thread running forever
+        #this works because even if we turn off working, we'll have stuff queued and we'll loop in the inner loop until the queue is cleared
+        until @db_queue.empty? do
+          #begin
+            sql, key = @db_queue.pop()
+            statement = db.prepare(sql)
+            statement.execute!
+            @db_log.info sql[11..20].strip if key == nil #log 20 characters (baseically table) if there's no key(ie from detectives)
+            @db_log_main.info sql[11..20].strip unless key == nil
+            @db_log_link.info "insert length = #{sql.length}; queue length = #{@db_queue.size}" if key == nil && sql[11..20] =~ /link/
+            #the value to reference the written value at
+            if key #only do this if we need to return it
+              id = db.get_first_value("SELECT last_insert_rowid()").to_s
+              @db_results[key] = id
+              #puts 'wrote id: ' + key.to_s + ' ' + id
+            end
+          #rescue Exception => e
+          #  puts 'Exception: ' + e.to_s
+          #  puts e.backtrace
+          #ensure
+            #puts 'done writing'
+          #end
+        end
+      end
+      #db.close unless db.closed?
+    end
   end
   
   def hear(message)
     if should_store?(message)
       info = store!(message)
-      #TODO call our methods in other threads
+      #puts 'stored'
+      #call our methods in other threads: Process.fork (=> actual system independent processes) or Thread.new = in ruby vm psuedo threads?
       ## so should the detective classes be static, so there's no chance of trying to access shared resources at the same time?
-      #
-      #TODO build in some error handling/logging to see if threads die/blow up and what we missed
-      @detectives.each do |detective|
-        #detective = clazz
-        #Process.fork do
-        begin
-          Thread.new do
-            detective.investigate(info)
-          end
-        rescue => e
-        #  log("ERROR: sample id ##{info[0]} caused: #{e.message} at #{e.backtrace.first}")
-          throw Exception.new("ERROR: sample id ##{info[0]} caused: #{e.message} at #{e.backtrace.first}")
+      #TODO build in some error handling/logging/queue to see if threads die/blow up and what we missed
+
+      @detectives.each do |clazz|
+        clues = info.dup
+        @workers.dispatch do #on another thread
+          #let's be careful passing around objects here, we need to make sure that if we modifying them on different threads, that's okay...
+	        start_detective(clues,clazz,message)
         end
       end
     end
   end
   
+  def start_detective(info, clazz, message)
+    detective = clazz.new(@db_queue)
+    #wait for this to be written to the db
+    loop do
+       break if @db_results[info.first]
+    end
+    id = @db_results[info.first]
+    info[0] = id
+    #mandatory wait period before investigating to allow wikipedia changes to propagate: 10s?
+    sleep(10)
+    begin
+      detective.investigate(info)
+    rescue Exception => e
+      str = "EXCEPTION: sample id ##{info[0]} caused: #{e.message} at #{e.backtrace.find{|i| i =~ /_detective|mediawiki/} } with #{message}"
+      @error.error str
+      #Thread.current.kill
+      exp = Exception.new(str)
+      exp.set_backtrace(e.backtrace.select{|i| i =~ /_detective/ })
+      raise exp
+    end
+  end
+
   def should_store? message
     #keep messages that match our format...eventually this will be limited to certain messages, should we spin out a thread per message?
     message =~ /\00314\[\[\00307(.*)\00314\]\]\0034\ (.*)\00310\ \00302(.*)\003\ \0035\*\003\ \00303(.*)\003\ \0035\*\003\ \((.*)\)\ \00310(.*)\003/ #TODO this is silly, we should only scan this once...below, probably
@@ -87,10 +153,10 @@ class EnWikiBot < Bot #TODO db.close
     fields[3] = fields[3].to_i
     fields[5] = fields[5].to_i
     
-    id = db_write! [fields[0], fields[1], fields[2], fields[3], fields[4], fields[5], time.to_i, fields[6]]
+    key = db_write! [fields[0], fields[1], fields[2], fields[3], fields[4], fields[5], time.to_i, fields[6]]
     
     #return the info used to create this so we can just pass them in code instead of querying the db
-    [id.to_i, fields[0], fields[1], fields[2], fields[3], fields[4], fields[5], time, fields[6]]
+    [key, fields[0], fields[1], fields[2], fields[3], fields[4], fields[5], time, fields[6]]
   end
 
   #given the irc announcement in the irc monitoring channel for en.wikipedia, this returns the different fields
@@ -115,7 +181,7 @@ class EnWikiBot < Bot #TODO db.close
   end
   
   def db_create! db_name
-    @db = SQLite3::Database.new("#{db_name}.#{DB_SUFFIX}")
+    SQLite3::Database.new("#{db_name}.#{DB_SUFFIX}")
   end
   
   def db_create_schema! table_name
@@ -129,17 +195,11 @@ class EnWikiBot < Bot #TODO db.close
   end
   
   def db_open db_name
-    @db = SQLite3::Database.open("#{db_name}.#{DB_SUFFIX}")
+    db = SQLite3::Database.open("#{db_name}.#{DB_SUFFIX}")
+    db.type_translation = true
+    db.busy_timeout(1000) #in ms, 1000 = 1s
+    db
   end
-  
-  def db_init
-    @db.type_translation = true
-  end
-  
-  #def log message
-  #  @log_file.puts "#{@name} received @ #{Time.now.strftime('%Y%m%d %H:%M.%S')}:  #{message}"
-  #  @log_file.flush
-  #end
   
   #args should be: article_name, desc, rev_id, old_id, user, byte_diff, ts, description
   def db_write! args
@@ -153,12 +213,13 @@ class EnWikiBot < Bot #TODO db.close
       (article_name, desc, revision_id, old_id, user, byte_diff, ts, description)
       VALUES ('%s', '%s', '%d', %d, '%s', %d, %d, '%s')
     } % ([@table_name] + args)#article_name, desc, rev_id, old_id, user, byte_diff, ts, description
-    statement = @db.prepare(sql)
-    statement.execute!
     
+    #deal with multiple threads writing to db
+    key = Digest::MD5.hexdigest(Time.now.to_i.to_s + sql)
+    @db_queue << [sql, key]
+    key
     #return the primary id of the row that was created:
-    @db.get_first_value("SELECT last_insert_rowid()")
+    #@db.get_first_value("SELECT last_insert_rowid()")
   end
   
 end
-  

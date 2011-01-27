@@ -1,16 +1,16 @@
 require 'detective.rb'
 require 'mediawiki_api.rb'
-
+require 'base64'
 require 'time'
 
 class AuthorDetective < Detective
-  def table_name
+  def self.table_name
     'author'
   end
 
   #return a proc that defines the columns used by this detective
   #if using this as an example, you probably should copy the first two columns (the id and foreign key)
-  def columns
+  def self.columns
     Proc.new do
       <<-SQL
       id integer primary key autoincrement,
@@ -36,6 +36,7 @@ class AuthorDetective < Detective
       block_expiry timestamp,
       block_reason text,
       user_talkpg_text text,
+      created DATE DEFAULT (datetime('now','localtime')),
       FOREIGN KEY(sample_id) REFERENCES irc_wikimedia_org_en_wikipedia(id)    --these foreign keys probably won't be enforced b/c sqlite doesn't include it by default--TODO this foreign table name probably shouldn't be hard coded
 SQL
     end
@@ -55,7 +56,7 @@ SQL
     #TODO if we already have data for a user, should we look it up?
     
     #http://en.wikipedia.org/w/api.php?action=query&titles=User:Tisane&prop=info|flagged&list=blocks|globalblocks|logevents|recentchanges|tags
-    
+
     account = find_account_history(info)
     
     #http://en.wikipedia.org/w/api.php?action=query&list=logevents&leuser=Tisane&lelimit=max <- actions taken by user
@@ -66,7 +67,9 @@ SQL
     
     #res = parse_xml(get_xml())
    
-   if (account[11]=0)
+   if(account == nil)
+     
+   elsif (account[11] == 0)
     db_write!(  
       [
         'sample_id', 
@@ -123,21 +126,38 @@ SQL
     xml = get_xml({:format => :xml, :action => :query, :list => :users, :ususers => info[5], :usprop => 'groups|editcount|registration|emailable' })
     res = parse_xml(xml)
     
-    create = Time.parse(res.first['users'].first['user'].first['registration'])
-    editcount = res.first['users'].first['user'].first['editcount']
-    groups = res.first['users'].first['user'].first['groups']
+    rxml = res.first['users'].first['user'].first
+    #if it's an IP address, won't have anything
+    create = '-'
+    life = 0
+    editcount = 0
+    if(rxml['registration'] != nil)
+      create = Time.parse(rxml['registration'])
+      life = info[7] - create
+      create = create.to_i
+      life = life.to_i
+    end
+    
+    editcount = 0
+    if(rxml['editcount'] != nil)
+      #for ip address users, there is no editcount, take that from below instead
+      editcount = rxml['editcount']
+    else
+      editcount_xml = get_xml({:format => :xml, :action => :query, :list => :usercontribs, :ucuser => info[5], :uclimit => 500})
+      editcount_res = parse_xml(editcount_xml)
+      editcount = editcount_res.first['usercontribs'].first['item'].length
+    end
+    
+    groups = rxml['groups']
     #emailable = res.first['users'].first['user'].first['emailable']    
     
-    if(groups!=nil)
-	    groups = groups.first['g'].join("##")
+    if(groups != nil)
+	    groups = Base64.encode64(Marshal.dump(groups.first['g']))
     else
 	    groups = ""
     end
-    		 
-    life = info[7] - create
     
     #http://en.wikipedia.org/w/api.php?action=query&list=usercontribs&ucuser=YurikBot
-    
     second_ago = info[7]-1
     minute_ago = info[7]-60
     hour_ago = info[7]-(60*60)
@@ -148,7 +168,7 @@ SQL
 
     times = [second_ago, minute_ago, hour_ago, day_ago, week_ago, month_ago, year_ago]
     i = 0
-    editcount_bucket = [0] * 7 #7 0's in an array
+    editcount_bucket = [0] * 7 #this is 7 zeros in an array
     times.each do |time|
       xml2 = get_xml({:format => :xml, :action => :query, :list => :usercontribs, :ucuser => info[5], :ucstart => info[7].strftime("%Y-%m-%dT%H:%M:%SZ"), :ucend => time.strftime("%Y-%m-%dT%H:%M:%SZ"), :uclimit => 500})
       res2 = parse_xml(xml2)
@@ -174,12 +194,18 @@ SQL
     usertalkpg_title = "User:"+info[5]
     xml4 = get_xml({:format => :xml, :action => :query, :prop => :revisions, :titles => usertalkpg_title, :rvprop => 'content'})
     res4 = parse_xml(xml4)
+    
+    source = ''
+    if res4.first['pages'].first['page'].first['revisions'] != nil
+       if res4.first['pages'].first['page'].first['revisions'].first['rev'] !=nil
+       	  source = res4.first['pages'].first['page'].first['revisions'].first['rev'].first['content']
+       end
+    end
 
-    source = res4.first['pages'].first['page'].first['revisions'].first['rev'].first['content']
 
     #Need to get info on rights
     
-    [create.to_i, life.to_i, editcount.to_i] + editcount_bucket + [groups.to_s, blocktimes] + blockinfo + [source]
+    [create, life, editcount.to_i] + editcount_bucket + [groups.to_s, blocktimes] + blockinfo + [source]
   end
 
   #block_id integer,

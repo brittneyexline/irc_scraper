@@ -2,26 +2,47 @@ require 'rubygems'
 require 'sqlite3'
 
 class Detective
-  attr_accessor :db
-  
-  def initialize db
-    @db = db
-    setup_table()
-  end
-  
-  def table_name
-    # To be defined in subclasses
-    #TODO should this be empty? or NotImplementedYet error?
-    'detective'
-  end
-
-  #return a proc that defines the columns used by this detective
-  def columns
-    Proc.new do
-      "id integer primary key, value text"
+  class << self
+    def table_name
+      # To be defined in subclasses
+      #TODO should this be empty? or NotImplementedYet error?
+      'detective'
     end
-  end
 
+    #return a proc that defines the columns used by this detective
+    def columns
+      Proc.new do
+        "id integer primary key, value text"
+      end
+    end
+
+    def sql_prefix
+      "CREATE TABLE "
+    end
+
+    #By default calls the proc returned by the #columns() method
+    #Pass an optional block expected to return a string of the column definitions
+    def sql_suffix #&cols
+      cols = block_given? ? yield : columns().call
+      " #{table_name()} (#{cols})"
+    end
+
+    def setup_table db
+      unless table_exists?(db, table_name())
+        db.execute_batch(sql_prefix() + sql_suffix())
+      end
+    end
+
+    def table_exists? db, name
+      #sqlite specific...
+      db.get_first_value("SELECT name FROM sqlite_master WHERE name='" + name + "'")
+    end
+  end #end class methods
+  
+  def initialize db_queue
+    @db_queue = db_queue
+  end
+  
   #main entry method for this class
   #should call db_write! to put results discovered during the investigation into the table
   #info is a list of primary_id, article_name, desc, rev_id (string), old_id (string), user, byte_diff, timestamp, description
@@ -39,37 +60,15 @@ class Detective
       if o.is_a?(String)
         o = SQLite3::Database.quote(o) #need to escape single quotes, not c-style for sqlite, but two single quotes
         ret = "'#{o}'"
+      elsif o == nil
+        ret = 'NULL'
       end
       ret
     end
     data_sql = data_quoted.join(', ')
-    sql = %{INSERT INTO %s ( %s ) VALUES ( %s ) } % [table_name(), column_sql, data_sql]
-    statement = @db.prepare(sql)
-    statement.execute!
-    
-    #return the primary id of the row that was created:
-    @db.get_first_value("SELECT last_insert_rowid()")
-  end
-  
-  def sql_prefix
-    "CREATE TABLE "
-  end
-  
-  #By default calls the proc returned by the #columns() method
-  #Pass an optional block expected to return a string of the column definitions
-  def sql_suffix #&cols
-    cols = block_given? ? yield : columns().call
-    " #{table_name()} (#{cols})"
-  end
-  
-  def setup_table
-    unless table_exists?(table_name())
-      @db.execute_batch(sql_prefix() + sql_suffix())
-    end
-  end
-  
-  def table_exists? name
-    #sqlite specific...
-    @db.get_first_value("SELECT name FROM sqlite_master WHERE name='" + name + "'")
+    sql = %{INSERT INTO %s ( %s ) VALUES ( %s ) } % [self.class.table_name(), column_sql, data_sql]
+    @db_queue << [sql]
+    true
+    #puts 'queued from detective to ' + @db_queue.size.to_s #@db_queue.to_s
   end
 end

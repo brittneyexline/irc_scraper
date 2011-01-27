@@ -12,12 +12,17 @@ TABLE_SCHEMA_SUFFIX = <<-SQL
       user varchar(64),
       byte_diff integer,
       ts timestamp(20),
-      description text
+      description text,
+      created DATE DEFAULT (datetime('now','localtime'))
     )
 SQL
 
 PID_FILE_PATH = File.dirname(__FILE__) + '/../tmp/pid.txt'
 IRC_LOG_DIR_PATH = File.dirname(__FILE__) + '/../log'
 
-WIKI_API_SERVER = 'en.wikipedia.org' #no http:// and no trailing slash
+WIKI_API_SERVER = 'en.wikipedia.org' #no http:// and no trailing slash #TODO just keep this in one and to URI.parse(url).
 WIKI_API_PATH = '/w/api.php' #leading slash
+
+ALEXA_API_PATH = 'awis.amazonaws.com'
+ALEXA_KEY_ID = 'ENTER KEY'
+ALEXA_SECRET_KEY = 'ENTER KEY'
