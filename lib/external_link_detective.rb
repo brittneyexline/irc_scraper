@@ -123,7 +123,7 @@ SQL
       'rank_by_country' 'screenshot', 'phishing', 'malware'],
       [info[2], linkentry[:link], linkentry[:source], linkentry[:description], linkentry[:headers]] +
         linkentry[:linkinfo] +
-        [[linkentry[:screenshot], linkentry[:phishing], linkentry[:malware]] )
+        [linkentry[:screenshot], linkentry[:phishing], linkentry[:malware]] )
     end	
     true # :)
   end	
