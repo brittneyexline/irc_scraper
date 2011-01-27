@@ -59,7 +59,7 @@ class ExternalLinkDetective < Detective
       screenshot text,
       phishing text,
       malware text,
-      FOREIGN KEY(revision_id) REFERENCES irc_wikimedia_org_en_wikipedia(id)   --TODO this table name probably shouldnt be hard coded
+      FOREIGN KEY(revision_id) REFERENCES irc_wikimedia_org_en_wikipedia(revision_id)   --TODO this table name probably shouldnt be hard coded
 
 SQL
     end

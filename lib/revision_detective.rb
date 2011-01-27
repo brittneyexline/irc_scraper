@@ -24,7 +24,7 @@ class RevisionDetective < Detective
       -- TODO only_link boolean,
       created DATE DEFAULT (datetime('now','localtime')),
       --tags 
-      FOREIGN KEY(revision_id) REFERENCES irc_wikimedia_org_en_wikipedia(id)   --TODO this table name probably shouldn't be hard coded
+      FOREIGN KEY(revision_id) REFERENCES irc_wikimedia_org_en_wikipedia(revision_id)   --TODO this table name probably shouldn't be hard coded
       --FOREIGN KEY(user) REFERENCES irc_wikimedia_org_en_wikipedia(user) --TODO
 SQL
     end
