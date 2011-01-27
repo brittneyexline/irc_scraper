@@ -25,7 +25,7 @@ class ExternalLinkDetective < Detective
       headers text,
       source text,
       description text,
-      --created DATE DEFAULT (datetime('now','localtime'))
+      created DATE DEFAULT (datetime('now','localtime'))
 
       title string,
       site_description string,
@@ -66,7 +66,17 @@ SQL
   end
 
   #info is a list: 
-  # see notes before start_detective in enwiki_bot
+  # 0: article_name (string), 
+  # 1: desc (string), 
+  # 2: rev_id (string),
+  # 3: old_id (string)
+  # 4: user (string), 
+  # 5: byte_diff (int), 
+  # 6: description (string)
+  # 7: diff_unescaped_xml (string)
+  # 8: attributes from call: user, timestamp, revid, size, title, from, to, parentid, anon, ns, space, pageid
+  # 9: tags (Array)
+  # 10: array of array of links found in [url, desc] format, description may be nil if it was not a wikilink
   def investigate info
     linkarray = info.last
     
@@ -85,7 +95,7 @@ SQL
       resp2 = Net::HTTP.get_response(URI.parse(request))
       file = File.open( imname , 'wb' )
       file.write(resp2.body)
-      #all of andrews malware code needst to be in the same directory as this file,
+      #all of andrews malware code needs to be in the same directory as this file,
       #it doesn't run the command properly when you try to call the file with the pathname
       malware_info = find_malware_info(link)
       
@@ -168,7 +178,9 @@ def find_alexa_info(link)
       linkinfo = Alexa::UrlInfo.new(:host => link)
       xml = linkinfo.connect
       linkinfo.parse_xml(xml)
-       rank, rank_delta, reach_rank, reach_rank_delta, reach_permill, reach_permill_delta, views_permill, views_permill_delta, views_rank, views_rank_delta, views_peruser, views_peruser_delt = nil
+       rank, rank_delta, reach_rank, reach_rank_delta, reach_permill, 
+         reach_permill_delta, views_permill, views_permill_delta, views_rank,
+         views_rank_delta, views_peruser, views_peruser_delt = nil
       stats = linkinfo::usage_statistics
       if stats
       	 if !stats.empty?

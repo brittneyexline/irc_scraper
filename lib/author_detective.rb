@@ -14,7 +14,7 @@ class AuthorDetective < Detective
     Proc.new do
       <<-SQL
       id integer primary key autoincrement,
-      sample_id integer,                                                      --foreign key to reference the original revision
+      revision_id integer,                                                      --foreign key to reference the original revision
       account_creation timestamp(20),                                         --this should be the entry in the logevents call, but if we exceed the max number of requests, we won't get it
       account_lifetime integer,                                               --this is the lifetime of the account in seconds
       edits_last_second integer,                                              --want a figure to show recent activity do buckets instead
@@ -37,13 +37,23 @@ class AuthorDetective < Detective
       block_reason text,
       user_talkpg_text text,
       created DATE DEFAULT (datetime('now','localtime')),
-      FOREIGN KEY(sample_id) REFERENCES irc_wikimedia_org_en_wikipedia(id)    --these foreign keys probably won't be enforced b/c sqlite doesn't include it by default--TODO this foreign table name probably shouldn't be hard coded
+      FOREIGN KEY(revision_id) REFERENCES irc_wikimedia_org_en_wikipedia(id)    --these foreign keys probably won't be enforced b/c sqlite doesn't include it by default--TODO this foreign table name probably shouldn't be hard coded
 SQL
     end
   end
 
-  #info is a list: 
-  # see notes before start_detective in enwiki_bot
+  #info is a list:
+  # 0: article_name (string),
+  # 1: desc (string),
+  # 2: rev_id (string),
+  # 3: old_id (string)
+  # 4: user (string),
+  # 5: byte_diff (int),
+  # 6: description (string)
+  # 7: diff_unescaped_xml (string)
+  # 8: attributes from call: user, timestamp, revid, size, title, from, to, parentid, anon, ns, space, pageid
+  # 9: tags (Array)
+  # 10: array of array of links found in [url, desc] format, description may be nil if it was not a wikilink
   def investigate info
     #TODO if we already have data for a user, should we look it up?
     
@@ -64,7 +74,7 @@ SQL
    elsif (account[11] == 0)
     db_write!(  
       [
-        'sample_id', 
+        'revision_id',
         'account_creation', 
         'account_lifetime', 
         'total_edits', 
@@ -79,12 +89,12 @@ SQL
         'num_times_blocked', 
         'user_talkpg_text'
       ],
-      [info[0]] + account
+      [info[2]] + account
     )
    else
      db_write!(
       [
-        'sample_id', 
+        'revision_id',
         'account_creation', 
         'account_lifetime', 
         'total_edits', 
@@ -104,7 +114,7 @@ SQL
         'block_reason', 
         'user_talkpg_text'
       ],
-      [info[0]] + account
+      [info[2]] + account
     )
    end
   end
@@ -115,7 +125,7 @@ SQL
     #res = parse_xml(get_xml({:format => :xml, :action => :query, :list => :logevents, :letitle => 'User:' + info[4], :lelimit => :max }))
     
     #http://en.wikipedia.org/w/api.php?action=query&list=users&ususers=1.2.3.4|Catrope|Vandal01|Bob&usprop=groups|editcount|registration|emailable
-    xml = get_xml({:format => :xml, :action => :query, :list => :users, :ususers => info[5], :usprop => 'groups|editcount|registration|emailable' })
+    xml = get_xml({:format => :xml, :action => :query, :list => :users, :ususers => info[4], :usprop => 'groups|editcount|registration|emailable' })
     res = parse_xml(xml)
     
     rxml = res.first['users'].first['user'].first
@@ -123,9 +133,10 @@ SQL
     create = '-'
     life = 0
     editcount = 0
+    timestamp = info[8]['timestamp']
     if(rxml['registration'] != nil)
       create = Time.parse(rxml['registration'])
-      life = info[7] - create #TODO all of these timestamps need to be changed to reflect the newer info structure
+      life = timestamp - create #TODO all of these timestamps need to be changed to reflect the newer info structure
       create = create.to_i
       life = life.to_i
     end
@@ -150,19 +161,19 @@ SQL
     end
     
     #http://en.wikipedia.org/w/api.php?action=query&list=usercontribs&ucuser=YurikBot
-    second_ago = info[7]-1
-    minute_ago = info[7]-60
-    hour_ago = info[7]-(60*60)
-    day_ago = info[7]-(60*60)*24
-    week_ago = info[7]- 60*60*24*7
-    month_ago = info[7]- 60*60*24*30
-    year_ago = info[7]- 60*60*24*365
+    second_ago = timestamp-1
+    minute_ago = timestamp-60
+    hour_ago = timestamp-(60*60)
+    day_ago = timestamp-(60*60)*24
+    week_ago = timestamp- 60*60*24*7
+    month_ago = timestamp- 60*60*24*30
+    year_ago = timestamp- 60*60*24*365
 
     times = [second_ago, minute_ago, hour_ago, day_ago, week_ago, month_ago, year_ago]
     i = 0
     editcount_bucket = [0] * 7 #this is 7 zeros in an array
     times.each do |time|
-      xml2 = get_xml({:format => :xml, :action => :query, :list => :usercontribs, :ucuser => info[5], :ucstart => info[7].strftime("%Y-%m-%dT%H:%M:%SZ"), :ucend => time.strftime("%Y-%m-%dT%H:%M:%SZ"), :uclimit => 500})
+      xml2 = get_xml({:format => :xml, :action => :query, :list => :usercontribs, :ucuser => info[4], :ucstart => timestamp.strftime("%Y-%m-%dT%H:%M:%SZ"), :ucend => time.strftime("%Y-%m-%dT%H:%M:%SZ"), :uclimit => 500})
       res2 = parse_xml(xml2)
       edits = res2.first['usercontribs'].first['item']
       if (edits != nil)
@@ -172,7 +183,7 @@ SQL
     end
 
     #http://en.wikipedia.org/w/api.php?action=query&list=blocks&bkprop=id|user|by|timestamp|expiry|reason&bklimit=max&bkusers=Tisane 
-    xml3 = get_xml({:format => :xml, :action => :query, :list => :blocks, :bkusers => info[5], :bklimit => :max, :bkprop => 'id|user|by|timestamp|expiry|reason' })
+    xml3 = get_xml({:format => :xml, :action => :query, :list => :blocks, :bkusers => info[4], :bklimit => :max, :bkprop => 'id|user|by|timestamp|expiry|reason' })
     res3 = parse_xml(xml3)
     blockinfo = res3.first['blocks'].first['block']
     blocktimes = 0
@@ -183,7 +194,7 @@ SQL
 	    blockinfo = [] #empty array cause we ignore it above
     end
     
-    usertalkpg_title = "User:"+info[5]
+    usertalkpg_title = "User:"+info[4]
     xml4 = get_xml({:format => :xml, :action => :query, :prop => :revisions, :titles => usertalkpg_title, :rvprop => 'content'})
     res4 = parse_xml(xml4)
     
@@ -193,9 +204,6 @@ SQL
        	  source = res4.first['pages'].first['page'].first['revisions'].first['rev'].first['content']
        end
     end
-
-
-    #Need to get info on rights
     
     [create, life, editcount.to_i] + editcount_bucket + [groups.to_s, blocktimes] + blockinfo + [source]
   end
