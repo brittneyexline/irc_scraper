@@ -11,13 +11,8 @@ TABLE_SCHEMA_SUFFIX = <<-SQL
       old_id integer,
       user varchar(64),
       byte_diff integer,
-<<<<<<< HEAD
-      ts timestamp(20),
-      description text
-=======
       description text,
       created DATE DEFAULT (datetime('now','localtime'))
->>>>>>> 97ce4d1a19e6a9b03f26b2a3e928e1c161cd8114
     )
 SQL
 
@@ -28,5 +23,5 @@ WIKI_API_SERVER = 'en.wikipedia.org' #no http:// and no trailing slash
 WIKI_API_PATH = '/w/api.php' #leading slash
 
 ALEXA_API_PATH = 'awis.amazonaws.com'
-ALEXA_KEY_ID = 'AKIAIMTJEMWPATGDMXSQ'
-ALEXA_SECRET_KEY = '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'
+ALEXA_KEY_ID = 'FILL IN KEY'
+ALEXA_SECRET_KEY = 'FILL IN KEY'
