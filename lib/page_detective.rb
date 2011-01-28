@@ -2,6 +2,7 @@ require 'detective.rb'
 require 'mediawiki_api.rb'
 require 'time'
 require 'sqlite3'
+require 'bundler/setup'
 require 'nokogiri'
 
 class PageDetective < Detective
@@ -25,6 +26,7 @@ class PageDetective < Detective
       num_views integer,
       talk_id integer,
       page_id integer,
+      tags string,
       created DATE DEFAULT (datetime('now','localtime')),
       --FOREIGN KEY(revision_id) REFERENCES irc_wikimedia_org_en_wikipedia(revision_id)   --TODO this table name probably shouldn't be hard coded
 SQL
@@ -46,7 +48,7 @@ SQL
   def investigate info
     page = find_page_history(info)
     db_write!(
-      ['revision_id', 'page_last_revision_id', 'page_last_revision_time', 'page_text', 'length', 'num_views', 'talk_id', 'page_id'],
+      ['revision_id', 'page_last_revision_id', 'page_last_revision_time', 'page_text', 'length', 'num_views', 'talk_id', 'page_id', 'tags'],
       [info[2]] + page
     )
   end
@@ -66,7 +68,7 @@ SQL
     xml = get_xml({:format => :xml, :action => :query, :prop => :revisions, :revids => info[2], :rvprop => 'content'})
     res2 = parse_xml(xml)
     source = ''
-    if(res.first['badrevids'] == nil)
+    if(res2.first['badrevids'] == nil)
       source = res2.first['pages'].first['page'].first['revisions'].first['rev'].first['content'].to_s
     end   
 
@@ -74,7 +76,7 @@ SQL
     xml = get_xml({:format => :xml, :action => :query, :revids => info[2], :prop => :info, :inprop => 'protection|talkid'})
     res3 = parse_xml(xml)
     num_views, length, touched, last_revid, talk_id, page_id = nil
-    if(res.first['badrevids'] == nil)
+    if(res3.first['badrevids'] == nil)
       num_views = res3.first['pages'].first['page'].first['counter'].to_i
       length = res3.first['pages'].first['page'].first['length'].to_i
       touched = Time.parse(res3.first['pages'].first['page'].first['touched']).to_i
@@ -82,10 +84,13 @@ SQL
       talk_id = res3.first['pages'].first['page'].first['talkid'].to_i
       page_id = res3.first['pages'].first['page'].first['pageid'].to_i
     end
-    
+
+    if (info[8])
+      tags = info[8]["tags"]
+    end
     #Need to encode this into a string using sqlite method or serialize it somehow
     #puts encode(res3.first['pages'].first['page'].first['protection'])
     #TODO: get protection
-    [last_revid, touched, source, length, num_views, talk_id, page_id]
+    [last_revid, touched, source, length, num_views, talk_id, page_id, tags]
   end  
 end

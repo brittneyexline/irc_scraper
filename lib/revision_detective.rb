@@ -56,27 +56,38 @@ SQL
   end
   
   def find_revision_info info
-    
-    xml = get_xml({:format => :xml, :action => :query, :prop => :revisions, :revids => info[2], :rvprop => 'ids|tags|flagged|timestamp|user|comment|size|flags', :rvdiffto => :prev})
-    res = parse_xml(xml)
-    
-    if(res.first['badrevids'] == nil) 
-       rxml = res.first['pages'].first['page'].first['revisions'].first['rev'].first
-       timestamp = find_timestamp(rxml)
-       user = find_user(rxml)
-       comment = find_comment(rxml)
-       size = find_size(rxml)
-       rev_content = find_content(rxml)
-       flag = find_flag(rxml)
-       namespace = find_namespace(res)
+    if (info[8])
+       timestamp = Time.parse(info[8]["timestamp"], "%Y-%m-%dT%H:%M:%SZ")
+       user = info[8]["user"]
+       comment = info[8]["comment"]
+       size = info[8]["size"]
+       is_minor = info[8]["minor"]
+       parent_id = info[8]["parentid"]
+       namespace = info[8]["ns"]
+    end
+    rev_content = info[7]
+    tags = info[9]
 
-       if (flag=="")
-       	  is_minor = 1
-       else
-          is_minor = 0
-       end
-
-#       #http://en.wikipedia.org/w/api.php?action=query&prop=extlinks&revids=800129
+#    xml = get_xml({:format => :xml, :action => :query, :prop => :revisions, :revids => info[2], :rvprop => 'ids|tags|flagged|timestamp|user|comment|size|flags', :rvdiffto => :prev})
+#    res = parse_xml(xml)
+#
+#    if(res.first['badrevids'] == nil)
+#       rxml = res.first['pages'].first['page'].first['revisions'].first['rev'].first
+#       timestamp = find_timestamp(rxml)
+#       user = find_user(rxml)
+#       comment = find_comment(rxml)
+#       size = find_size(rxml)
+#       rev_content = find_content(rxml)
+#       flag = find_flag(rxml)
+#       namespace = find_namespace(res)
+#
+#       if (flag=="")
+#       	  is_minor = 1
+#       else
+#          is_minor = 0
+#       end
+#
+#       http://en.wikipedia.org/w/api.php?action=query&prop=extlinks&revids=800129
 #       xml2= get_xml({:format => :xml, :action => :query, :prop => :extlinks, :revids => info[3]})
 #       res2 = parse_xml(xml2)
 #       links_new = res2.first['pages'].first['page'].first['extlinks']
@@ -108,10 +119,10 @@ SQL
 #
 #       linkdiff = links_new - links_old
 
-      [timestamp.to_i, user.to_s, comment.to_s, size.to_i, rev_content.to_s, is_minor.to_i, namespace]
-    else
-      []
-    end
+      [timestamp.to_i, user.to_s, comment.to_s, size.to_i, rev_content.to_s, is_minor, namespace, tags, parent_id.to_i]
+#    else
+#      []
+#    end
   end
   
   #rxml = ruby-ified xml
