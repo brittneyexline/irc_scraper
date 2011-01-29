@@ -19,7 +19,7 @@ class PageDetectiveTest < Test::Unit::TestCase
       description text)')
     @clazz = PageDetective
     @detective = @clazz.new(@db)
-    @info = [1,
+    @info = [
       'Amar Ben Belgacem',
       'M',
       '392473902',
@@ -38,7 +38,7 @@ class PageDetectiveTest < Test::Unit::TestCase
 
   def test_find_page_info_nils
     #always need to test badrevid when using oldid...
-    pageinfo = @detective.find_page_history([2,
+    pageinfo = @detective.find_page_history([
       'Category talk:Anime and manga articles with a missing image caption',
       '!N',
       '403743470',
@@ -46,13 +46,13 @@ class PageDetectiveTest < Test::Unit::TestCase
       'TheFarix',
       '+31',
       Time.parse('2010-02-10T22:17:39Z'),
-      "[[WP:AES|â†]]Created page with '{{WikiProject Anime and manga}}"])
+      "[[WP:AES|â†?]]Created page with '{{WikiProject Anime and manga}}"])
     assert_equal(["-", "", "{{WikiProject Anime and manga}}", "0", "0"], pageinfo)
   end
 
   def test_find_page_info_sqlite
     @clazz.setup_table(@db)
-    rownum = @detective.investigate([3,
+    rownum = @detective.investigate([
       'Category talk:1830 in Canada',
       'N',
       '404100591',

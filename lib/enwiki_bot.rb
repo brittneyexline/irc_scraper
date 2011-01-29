@@ -4,6 +4,7 @@ require 'author_detective.rb'
 require 'revision_detective.rb'
 require 'page_detective.rb'
 require 'external_link_detective.rb'
+require 'mediawiki_api.rb'
 
 require 'rubygems'
 require 'sqlite3'
@@ -11,6 +12,9 @@ require 'thread'
 require 'digest/md5'
 require 'ThreadPool.rb'
 require 'logger'
+
+require 'bundler/setup'
+require 'nokogiri'
 
 class EnWikiBot < Bot #TODO db.close
   
@@ -24,8 +28,9 @@ class EnWikiBot < Bot #TODO db.close
     @table_name = server.gsub(/\./, '_') + '_' + channel.gsub(/\./, '_') #TODO this isn't really sanitized...use URI.parse
     @error = Logger.new('log/bot.log') 
     @db_log = Logger.new('log/db.log')
-    @db_log_main = Logger.new('log/db_main.log')
-    @db_log_link = Logger.new('log/link.log')
+    #@db_log_main = Logger.new('log/db_main.log')
+    #@db_log_link = Logger.new('log/link.log')
+    @irc_log = Logger.new('log/feed.log')
     if db
       @db = db
       db_create_schema!(@table_name)
@@ -39,15 +44,14 @@ class EnWikiBot < Bot #TODO db.close
     @name = bot_name
     
     #https://github.com/danielbush/ThreadPool for info on the threadpool
-    @workers = ThreadPooling::ThreadPool.new(20)
+    @workers = ThreadPooling::ThreadPool.new(250) #base this on a rough guesstimate of how many seconds of work we get per second
     @db_queue = Queue.new
     #puts 'initial memory location: ' + @db_queue.to_s
-    @db_results = {}
     start_db_worker()
     
     #Thread.abort_on_exception = true #set this so that if there's an exception on any of these threads, everything quits - good for initial debugging
-    #@detectives = [RevisionDetective.new(@db), AuthorDetective.new(@db), ExternalLinkDetective.new(@db), PageDetective.new(@db)]
-    @detectives = [RevisionDetective, AuthorDetective, ExternalLinkDetective, PageDetective]
+    #@detectives = [RevisionDetective, AuthorDetective, ExternalLinkDetective, PageDetective]
+    @detectives = [ExternalLinkDetective]
     @detectives.each do |clazz|
       clazz.setup_table(@db)
     end
@@ -61,25 +65,37 @@ class EnWikiBot < Bot #TODO db.close
       loop do #keep this thread running forever
         #this works because even if we turn off working, we'll have stuff queued and we'll loop in the inner loop until the queue is cleared
         until @db_queue.empty? do
-          #begin
+          begin
             sql, key = @db_queue.pop()
-            statement = db.prepare(sql)
+            sql_cleaned = sql.gsub(/\x00/, '')#take out nul characters; don't write them to db
+            statement = db.prepare(sql_cleaned)
             statement.execute!
-            @db_log.info sql[11..20].strip if key == nil #log 20 characters (baseically table) if there's no key(ie from detectives)
-            @db_log_main.info sql[11..20].strip unless key == nil
-            @db_log_link.info "insert length = #{sql.length}; queue length = #{@db_queue.size}" if key == nil && sql[11..20] =~ /link/
-            #the value to reference the written value at
-            if key #only do this if we need to return it
-              id = db.get_first_value("SELECT last_insert_rowid()").to_s
-              @db_results[key] = id
-              #puts 'wrote id: ' + key.to_s + ' ' + id
+            #db_log is NOT threadsafe! that stuff write at different times to the file!
+            #@db_log.info sql[11..20].strip if key == nil #log 20 characters (baseically table) if there's no key(ie from detectives)
+            #@db_log_main.info sql[11..20].strip unless key == nil
+            #@db_log.info "insert length = #{sql.length}; queue length = #{@db_queue.size}" if key == nil && sql[11..20] =~ /link/
+          rescue SQLite3::SQLException, Exception => e
+            @db_log.error sql
+            @db_log.error e
+            begin
+              require 'net/smtp'
+
+              Net::SMTP.start('localhost') do |smtp|
+                smtp.send_message(
+                  "Something's gone wrong with our project! This is an automated message, but check db.log. #{Time.now.to_s}", 
+                  'senior_design@retrodict.com', 
+                  ['me@retrodict.com', 'brittney.exline@gmail.com', 'aagrawal@wharton.upenn.edu']
+                )
+              end
+            rescue Errno::ECONNREFUSED
+              #we couldn't connect
             end
-          #rescue Exception => e
-          #  puts 'Exception: ' + e.to_s
-          #  puts e.backtrace
+            #@db_log.error e.backtrace
+            #puts 'Exception: ' + e.to_s
+            #puts e.backtrace
           #ensure
             #puts 'done writing'
-          #end
+          end
         end
       end
       #db.close unless db.closed?
@@ -88,41 +104,147 @@ class EnWikiBot < Bot #TODO db.close
   
   def hear(message)
     if should_store?(message)
-      info = store!(message)
+      info, size = store!(message)
+      #@irc_log.info("#{size} - #{message[0..100]}")
       #puts 'stored'
       #call our methods in other threads: Process.fork (=> actual system independent processes) or Thread.new = in ruby vm psuedo threads?
       ## so should the detective classes be static, so there's no chance of trying to access shared resources at the same time?
       #TODO build in some error handling/logging/queue to see if threads die/blow up and what we missed
-
-      @detectives.each do |clazz|
-        clues = info.dup
-        @workers.dispatch do #on another thread
-          #let's be careful passing around objects here, we need to make sure that if we modifying them on different threads, that's okay...
-	        start_detective(clues,clazz,message)
-        end
-      end
-    end
+      if should_follow?(info[0])
+        #do the rest of this on threads - it could be slow, don't block
+        @workers.dispatch do
+          done = false
+          begin
+            data = get_diff_data(info[2])
+            links = find_links(data.first)
+            unless links.empty?
+              @irc_log.info("following: #{links.size.to_s}; #{info[0]}")
+              @detectives.each do |clazz|
+                clues = info + data + [links] #this should return copies of each of this, we don't want to pass around the original objects on different threads
+                
+                @workers.dispatch do #on another thread
+                  #let's be careful passing around objects here, we need to make sure that if we modifying them on different threads, that's okay...
+        	        start_detective(clues,clazz,message)
+                end #end detective dispatch
+              end #end of detectives.each
+            else
+              @irc_log.info('not following: no links ' + info[0])
+            end #end of unless
+            done = true
+          ensure
+            @irc_log.error('broken!: ' + info[0] + ' ' + info[2]) unless done
+          end #end of error handling block
+        end #end of following dispatch
+      else
+        @irc_log.info('not following: wrong namespace ')
+      end #end of if follow
+    end #end of should_store?
   end
   
-  def start_detective(info, clazz, message)
-    detective = clazz.new(@db_queue)
-    #wait for this to be written to the db
-    loop do
-       break if @db_results[info.first]
+  #determines if there's at least 1 link in the revision
+  #returns diff text, 
+  def find_links xml_diff_unescaped
+    diff_html = CGI.unescapeHTML(xml_diff_unescaped)
+    noked = Nokogiri.HTML(diff_html)
+    linkarray = []
+    noked.css('.diff-addedline').each do |td| #TODO should probably be looking specifically at .diffchange children for added text within the line
+      revision_line = Nokogiri.HTML(CGI.unescapeHTML(td.children.to_s)).css('div').children
+      #http://daringfireball.net/2010/07/improved_regex_for_matching_urls
+      #%r{(?i)\b((?:https?://|www\d{0,3}[.]|[a-z0-9.\-]+[.][a-z]{2,4}/)(?:[^\s()<>]+|\(([^\s()<>]+|(\([^\s()<>]+\)))*\))+(?:\(([^\s()<>]+|(\([^\s()<>]+\)))*\)|[^\s`!()\[\]{};:'".,<>?«»“”‘’]))}
+      url = %r{(?i)\b((?:https?://|www\d{0,3}[.]|[a-z0-9.\-]+[.][a-z]{2,4}/)(?:[^\s()<>]+|\(([^\s()<>]+|(\([^\s()<>]+\)))*\))+(?:\(([^\s()<>]+|(\([^\s()<>]+\)))*\)|[^\s`!()\[\]{};:'".,<>?«»“”‘’]))}x
+      #based on http://www.mediawiki.org/wiki/Markup_spec/BNF/Links
+      external_link_regex = /\[(#{url}\s*(.*?))\]/
+      #TOOD only look at text in the .diffchange
+      #TODO pull any correctly formed links in the diff text
+      #TODO on longer revisions, this regex takes FOREVER! need to simplify!
+      #TODO test this on pages with multiple links...
+      res = revision_line.to_s.scan(external_link_regex) 
+      if res.size > 0
+        #p res
+        res = res.first.compact
+        #["http://www.eyemagazine.com/feature.php?id=62&amp;fid=270 Designing heroes", "http://www.eyemagazine.com/feature.php?id=62&amp;fid=270", "Designing heroes"]
+        linkarray << [res[1], #link
+                      res[2]] #description
+      end
     end
-    id = @db_results[info.first]
-    info[0] = id
-    #mandatory wait period before investigating to allow wikipedia changes to propagate: 10s?
-    sleep(10)
+    linkarray
+  end
+  
+  def get_diff_data rev_id
+    #http://en.wikipedia.org/w/api.php?action=query&prop=revisions&revids=363492332&rvdiffto=prev&rvprop=ids|flags|timestamp|user|size|comment|parsedcomment|tags|flagged
+    xml = get_xml({:format => :xml, :action => :query, :prop => :revisions, :revids => rev_id, :rvdiffto => 'prev', :rvprop => 'ids|flags|timestamp|user|size|comment|parsedcomment|tags|flagged' })
+    noked = Nokogiri.XML(xml)
+    attrs = {}
+    #page attributes
+    # pageid = 
+    # ns = 
+    # title = 
+    # tags = 
+    noked.css('page').first.attributes.each do |k,v|
+      attrs[v.name] = v.value
+    end
+    
+    #rev attributes
+    # revid
+    # parentid
+    # minor
+    # user
+    # timestamp
+    # size
+    # comment
+    noked.css('rev').first.attributes.each do |k,v|
+      attrs[v.name] = v.value
+    end
+    
+    #tags
+    tags = []
+    noked.css('tags').children.each do |child|
+      tags << child.children.to_s
+    end
+    
+    #diff attributes
+    diff_elem = noked.css('diff')
+    diff_elem.first.attributes.each do |k,v|
+      attrs[v.name] = v.value
+    end
+    diff = diff_elem.children.to_s
+    
+    [diff, attrs, tags]
+  end
+  
+  #look at title, exclude titles starting with: User talk, Talk, Wikipedia, User, etc.
+  def should_follow? article_title 
+    bad_beg_regex = /^(Talk:|User:|User\stalk:|Wikipedia:|Wikipedia\stalk:|File\stalk:|MediaWiki:|MediaWiki\stalk:|Template\stalk:|Help:|Help\stalk:|Category\stalk:|Thread:|Thread\stalk:|Summary\stalk:|Portal\stalk:|Book\stalk:|Special:|Media:)/
+    !(article_title =~ bad_beg_regex)
+  end
+  
+  #clues:
+  # 0: article_name (string), 
+  # 1: desc (string), 
+  # 2: rev_id (string),
+  # 3: old_id (string)
+  # 4: user (string), 
+  # 5: byte_diff (int), 
+  # 6: description (string)
+  # 7: diff_unescaped_xml (string)
+  # 8: attributes from call: user, timestamp, revid, size, title, from, to, parentid, anon, ns, space, pageid
+  # 9: tags (Array)
+  # 10: array of array of links found in [url, desc] format, description may be nil if it was not a wikilink
+  def start_detective(clues, clazz, message)
+    detective = clazz.new(@db_queue)
+    #mandatory wait period before investigating to allow wikipedia changes to propagate: => time we kill hitting wikipedia for external link stuff
+    done = false
     begin
-      detective.investigate(info)
+      detective.investigate(clues)
+      done = true
     rescue Exception => e
       str = "EXCEPTION: sample id ##{info[0]} caused: #{e.message} at #{e.backtrace.find{|i| i =~ /_detective|mediawiki/} } with #{message}"
-      @error.error str
-      #Thread.current.kill
-      exp = Exception.new(str)
-      exp.set_backtrace(e.backtrace.select{|i| i =~ /_detective/ })
-      raise exp
+      @error.error(str)
+      #exp = Exception.new(str)
+      #exp.set_backtrace(e.backtrace.select{|i| i =~ /_detective/ })
+      #raise exp
+    ensure
+      @error.error('ERROR at investigate with ' + message) unless done
     end
   end
 
@@ -131,32 +253,28 @@ class EnWikiBot < Bot #TODO db.close
     message =~ /\00314\[\[\00307(.*)\00314\]\]\0034\ (.*)\00310\ \00302(.*)\003\ \0035\*\003\ \00303(.*)\003\ \0035\*\003\ \((.*)\)\ \00310(.*)\003/ #TODO this is silly, we should only scan this once...below, probably
   end
   
-  #returns:
-  # 0: sample_id (string), 
-  # 1: article_name (string), 
-  # 2: desc (string), 
-  # 3: rev_id (string),
-  # 4: old_id (string)
-  # 5: user (string), 
-  # 6: byte_diff (int), 
-  # 7: timestamp (Time object), 
-  # 8: description (string)
+  #fields in the return:
+  # 0: article_name (string), 
+  # 1: desc (string), 
+  # 2: rev_id (string),
+  # 3: old_id (string)
+  # 4: user (string), 
+  # 5: byte_diff (int), 
+  # 6: description (string)
   def store! message
     fields = []
     fields = process_irc(message)
     #TODO for some reason, a bunch of messages get cut off and we don't get the entire thing...but then it shouldn't appear here...the regexp above should clear it...
     raise Exception.new("ERROR: message didn't parse") if fields == nil
     
-    time = Time.now
-    
     fields[2] = fields[2].to_i
     fields[3] = fields[3].to_i
     fields[5] = fields[5].to_i
     
-    key = db_write! [fields[0], fields[1], fields[2], fields[3], fields[4], fields[5], time.to_i, fields[6]]
+    size = db_queue(fields)
     
     #return the info used to create this so we can just pass them in code instead of querying the db
-    [key, fields[0], fields[1], fields[2], fields[3], fields[4], fields[5], time, fields[6]]
+    [fields, size]
   end
 
   #given the irc announcement in the irc monitoring channel for en.wikipedia, this returns the different fields
@@ -202,7 +320,7 @@ class EnWikiBot < Bot #TODO db.close
   end
   
   #args should be: article_name, desc, rev_id, old_id, user, byte_diff, ts, description
-  def db_write! args
+  def db_queue args
     #TODO put this in rescue blocks so that if something chokes, we don't completely die, and put in a new table (or maybe a column for logging errors?)
     args.collect! do |o|
       o.is_a?(String) ? SQLite3::Database.quote(o) : o
@@ -210,16 +328,12 @@ class EnWikiBot < Bot #TODO db.close
     
     sql = %{
       INSERT INTO %s
-      (article_name, desc, revision_id, old_id, user, byte_diff, ts, description)
-      VALUES ('%s', '%s', '%d', %d, '%s', %d, %d, '%s')
+      (article_name, desc, revision_id, old_id, user, byte_diff, description)
+      VALUES ('%s', '%s', '%d', %d, '%s', %d, '%s')
     } % ([@table_name] + args)#article_name, desc, rev_id, old_id, user, byte_diff, ts, description
     
-    #deal with multiple threads writing to db
-    key = Digest::MD5.hexdigest(Time.now.to_i.to_s + sql)
-    @db_queue << [sql, key]
-    key
-    #return the primary id of the row that was created:
-    #@db.get_first_value("SELECT last_insert_rowid()")
+    @db_queue << sql
+    @db_queue.size
   end
   
 end
